@@ -3,6 +3,8 @@ from PIL import Image, ImageFont, ImageDraw, ImageTk
 from colorama import Fore, Style
 from color import Color, Colors
 import tkinter
+from icon import Icons
+from cairosvg import svg2png
 
 
 class LayoutError(Exception):
@@ -462,6 +464,9 @@ class FileImage(Widget):
         if not size.is_null():
             self.size = size
 
+    def as_changed(self, new: 'FileImage'):
+        return new.path != self.path or new._size != self._size
+
     def layout(self, new: 'FileImage' = None):
         if new is None:
             self.image = Image.open(self.path).convert("RGBA")
@@ -485,13 +490,40 @@ class FileImage(Widget):
     def composite(self, new: 'FileImage' = None) -> bool:
         if new is None:
             return True
-        if self.size != new.size or self.path != new.path:
+        if self.as_changed(new):
             if self.size != new.size:
                 self.size = new.size
             elif self.path != new.path:
                 self.path = new.path
             return True
         return False
+
+
+class Icon(FileImage):
+    def __init__(self, icon: str, size: int = 20, color: Color = Colors.black):
+        super().__init__(icon, size=Size(size, size))
+        self.color = color
+
+    def as_changed(self, new: 'Icon'):
+        return super().as_changed(new) or self.color != new.color
+
+    def draw(self, new: 'Icon' = None):
+        super().draw(new)
+        if new is None or self.as_changed(new):
+            if new is None:
+                provider = self
+            else:
+                provider = new
+            color_mask = Image.new("RGBA", (provider.size.get()),
+                                   color=provider.color.rgb)
+            self.image.paste(color_mask, (0, 0), self.image)
+
+    def composite(self, new: 'FileImage' = None) -> bool:
+        value = super().composite(new)
+        if new is not None and self.color != new.color:
+            self.color = new.color
+        return value
+
 
 
 class Expanded(SingleChildWidget):
@@ -870,4 +902,39 @@ class FilledButton(StateFullWidget):
             self.background_color = self.color
         else:
             self.background_color = Color.alpha_blend(self.color, Colors.white.with_opacity(0.2))
+        self.main_state.set_state()
+
+
+class IconButton(StateFullWidget):
+    def __init__(self, icon: Icon, on_click: callable = lambda: None, color: Color = Colors.blue):
+        super().__init__()
+        self.color = color
+        self.background_color = Colors.transparent
+        self.icon = icon
+        self.on_click = on_click
+
+    def build(self) -> Widget:
+        return InkWell(
+            child=Container(
+                child=self.icon,
+                background_color=self.background_color,
+                border_radius=20
+            ),
+            on_hover=self._on_hover,
+            on_click=self._on_click
+        )
+    
+    def layout(self, new: 'Widget' = None):
+        self.constraints = (0, 0)
+        super().layout(new)
+
+    def _on_click(self):
+        self.on_click()
+        self.main_state.set_state()
+
+    def _on_hover(self, hover: bool):
+        if hover:
+            self.background_color = self.color.with_opacity(0.1)
+        else:
+            self.background_color = Colors.transparent
         self.main_state.set_state()

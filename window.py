@@ -2,6 +2,7 @@ import tkinter
 import widget
 from sys import platform
 from color import Color, Colors
+from icon import Icons
 
 
 class FontFamilies:
@@ -45,7 +46,7 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget
     root.geometry(settings.geometry)
     if settings.maximized:
         root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}")
-        if platform == "linux " or platform == "linux2":
+        if platform == "linux" or platform == "linux2":
             root.attributes('-zoomed', True)
         else:
             root.state('zoomed')
@@ -66,23 +67,15 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget
 class Test(widget.StateFullWidget):
     def __init__(self):
         super().__init__()
-        self.value = 20
+        self.color = Colors.red
 
     def build(self) -> widget.Widget:
-        return widget.Column(
-            main_axis_alignment=widget.MainAxisAlignment.space_between,
-            cross_axis_alignment=widget.CrossAxisAlignment.start,
-            children=[
-                widget.Text("Coucou", font_size=self.value),
-                widget.FilledButton(
-                    on_click=self.plus,
-                    text=widget.Text("Click me"),
-                )
-            ]
+        return widget.IconButton(
+            icon=widget.Icon(Icons.delete_rounded)
         )
 
     def plus(self):
-        self.value += 1
+        self.color = Colors.blue
         self.refresh()
 
 
