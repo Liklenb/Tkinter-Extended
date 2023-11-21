@@ -1,5 +1,6 @@
 import tkinter
 import widget
+from sys import platform
 from color import Color, Colors
 
 
@@ -44,7 +45,10 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget
     root.geometry(settings.geometry)
     if settings.maximized:
         root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}")
-        root.attributes('-zoomed', True)
+        if platform == "linux " or platform == "linux2":
+            root.attributes('-zoomed', True)
+        else:
+            root.state('zoomed')
     root.minsize(settings.minWidth, settings.minHeight)
 
     canvas = tkinter.Canvas(root, width=root.winfo_screenwidth(),
