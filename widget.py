@@ -3,8 +3,6 @@ from PIL import Image, ImageFont, ImageDraw, ImageTk
 from colorama import Fore, Style
 from color import Color, Colors
 import tkinter
-from icon import Icons
-from cairosvg import svg2png
 
 
 class LayoutError(Exception):
@@ -62,7 +60,8 @@ class EdgeInsets:
         return EdgeInsets(top=value, right=0, bottom=value, left=0)
 
     def __eq__(self, other):
-        return self.top == other.top and self.right == other.right and self.bottom == other.bottom and self.left == other.left
+        return self.top == other.top and self.right == other.right and \
+            self.bottom == other.bottom and self.left == other.left
 
 
 class Event:
@@ -477,9 +476,12 @@ class FileImage(Widget):
         else:
             if new.path != self.path:
                 self.image = Image.open(new.path).convert("RGBA")
-                if new.size.is_null():
+                if new._size.is_null():
                     new.size = Size(self.image.width, self.image.height)
-            if new._size != self._size:
+                else:
+                    new.size = new._size
+                    self.image.resize(new._size.get())
+            elif new._size != self._size:
                 if not new.size.is_null():
                     self.image = self.image.resize(new.size.get())
                 else:
@@ -518,12 +520,11 @@ class Icon(FileImage):
                                    color=provider.color.rgb)
             self.image.paste(color_mask, (0, 0), self.image)
 
-    def composite(self, new: 'FileImage' = None) -> bool:
+    def composite(self, new: 'Icon' = None) -> bool:
         value = super().composite(new)
         if new is not None and self.color != new.color:
             self.color = new.color
         return value
-
 
 
 class Expanded(SingleChildWidget):
@@ -625,7 +626,8 @@ class Column(MultipleChildrenWidget):
             if not isinstance(modifier.children[i], Expanded):
                 continue
             modifier.children[i].constraints = (self.constraints[0], (
-                0 if not isinstance(modifier.children[i], Expanded) else (self.constraints[1] - min_size) * flexs[j] // sum(flexs)))
+                0 if not isinstance(modifier.children[i], Expanded) else (self.constraints[1] - min_size) * flexs[
+                    j] // sum(flexs)))
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
             provider.size.width = max(provider.size.width, provider.children[i].size.width)
@@ -715,7 +717,7 @@ class Center(SingleChildWidget):
             Position(absolute_position.x + (
                     (new if new is not None else self).size.width - self.child.size.width) // 2,
                      absolute_position.y + (
-                                 (new if new is not None else self).size.height - self.child.size.height) // 2), state,
+                             (new if new is not None else self).size.height - self.child.size.height) // 2), state,
             new.child if new is not None else None)
 
     def draw(self, new: 'Center' = None):
@@ -750,6 +752,7 @@ class Container(SingleChildWidget):
         self.border_radius = border_radius
         self.border_width = border_width
         self.border_color = border_color
+        self._image = None
 
     def as_changed(self, new: 'Container'):
         return (self.background_color != new.background_color
@@ -765,9 +768,11 @@ class Container(SingleChildWidget):
         if new is not None and type(self.child) is not type(new.child):
             modifier = new
         modifier.child.constraints = (max(0, self.constraints[
-                     0] - provider.padding.left - provider.padding.right - provider.border_width * 2 - provider.border_radius),
-                 max(0, self.constraints[
-                     1] - provider.padding.top - provider.padding.bottom - provider.border_width * 2 - provider.border_radius))
+            0] - provider.padding.left - provider.padding.right - provider.border_width * 2 - provider.border_radius),
+                                      max(0, self.constraints[
+                                          1] - provider.padding.top
+                                          - provider.padding.bottom - provider.border_width * 2
+                                          - provider.border_radius))
         modifier.child.layout(provider.child if new is not None and type(self.child) is type(new.child) else None)
         if 0 in self.constraints:
             provider.size = Size(
@@ -923,7 +928,7 @@ class IconButton(StateFullWidget):
             on_hover=self._on_hover,
             on_click=self._on_click
         )
-    
+
     def layout(self, new: 'Widget' = None):
         self.constraints = (0, 0)
         super().layout(new)
