@@ -59,24 +59,18 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget
     canvas.pack()
     root.update()
     if child is not None:
-        child.first_state((root.winfo_width(), root.winfo_height()), canvas)
+        child.first_state((root.winfo_width(), root.winfo_height()), root, canvas)
 
     root.mainloop()
 
 
 class Test(widget.StateFullWidget):
-    def __init__(self):
-        super().__init__()
-        self.color = Colors.red
-
     def build(self) -> widget.Widget:
-        return widget.IconButton(
-            icon=widget.Icon(Icons.delete_rounded)
+        return widget.ListView(
+            children=[
+                widget.Text(str(x), color=Colors.blue, font_size=50) for x in range(50)
+            ]
         )
-
-    def plus(self):
-        self.color = Colors.blue
-        self.refresh()
 
 
 if __name__ == '__main__':

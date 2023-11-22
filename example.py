@@ -1,7 +1,8 @@
 from widget import (Size, EdgeInsets, Widget, StateFullWidget, MainAxisAlignment, CrossAxisAlignment, Text, FileImage,
-                    Expanded, Column, Row, Center, Container, InkWell, FilledButton)
+                    Expanded, Column, Row, Center, Container, InkWell, FilledButton, Icon, IconButton)
 from window import AppSettings, run_app
 from color import Color, Colors
+from icon import Icons
 
 
 class Example(StateFullWidget):

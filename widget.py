@@ -3,6 +3,7 @@ from PIL import Image, ImageFont, ImageDraw, ImageTk
 from colorama import Fore, Style
 from color import Color, Colors
 import tkinter
+from sys import platform
 
 
 class LayoutError(Exception):
@@ -68,6 +69,7 @@ class Event:
     registered_events = {
         "<Button-1>": [],
         "<Motion>": [],
+        "<MouseWheel>": []
     }
 
     @staticmethod
@@ -81,10 +83,28 @@ class Event:
             func(event)
 
     @staticmethod
+    def on_scroll(event: tkinter.Event):
+        for func in Event.registered_events["<MouseWheel>"]:
+            func(event)
+
+    @staticmethod
+    def on_scroll_down(event: tkinter.Event):
+        event.delta = -1
+        for func in Event.registered_events["<MouseWheel>"]:
+            func(event)
+
+    @staticmethod
+    def on_scroll_up(event: tkinter.Event):
+        event.delta = 1
+        for func in Event.registered_events["<MouseWheel>"]:
+            func(event)
+
+    @staticmethod
     def clear():
         Event.registered_events = {
             "<Button-1>": [],
             "<Motion>": [],
+            "<MouseWheel>": []
         }
 
 
@@ -251,6 +271,7 @@ class StateFullWidget(SingleChildWidget):
 
     garbage: ImageTk.PhotoImage
     canvas: tkinter.Canvas
+    root: tkinter.Tk
 
     def build(self) -> Widget:
         pass
@@ -264,15 +285,22 @@ class StateFullWidget(SingleChildWidget):
         self.canvas.delete("all")
         self.garbage = ImageTk.PhotoImage(self.image)
         self.canvas.create_image(0, 0, image=self.garbage, anchor=tkinter.NW)
+        self.root.update()
 
-    def first_state(self, constraints: tuple[int, int], canvas: tkinter.Canvas):
+    def first_state(self, constraints: tuple[int, int], root: tkinter.Tk, canvas: tkinter.Canvas):
         self.canvas = canvas
+        self.root = root
         self.constraints = constraints
         self.layout()
         self.register_events(Position(0, 0), self)
         # register events
         self.canvas.bind("<Button-1>", Event.on_click)
         self.canvas.bind("<Motion>", Event.on_motion)
+        if platform == "linux" or platform == "linux2":
+            root.bind("<5>", Event.on_scroll_up)
+            root.bind("<4>", Event.on_scroll_down)
+        else:
+            root.bind("<MouseWheel>", Event.on_scroll)
         self.draw()
         self.composite()
         self.garbage = ImageTk.PhotoImage(self.child.image)
@@ -535,6 +563,8 @@ class Expanded(SingleChildWidget):
         self.flex = flex
 
     def layout(self, new: 'SingleChildWidget' = None):
+        if self.constraints[self.axis] == 0:
+            raise LayoutError(f"Expanded was given unbounded {['width', 'height'][self.axis]}")
         if new is None:
             self.child.constraints = self.constraints
             self.child.layout()
@@ -606,9 +636,6 @@ class Column(MultipleChildrenWidget):
             if isinstance(child, Expanded):
                 flexs.append(child.flex)
 
-        if len(flexs) > 0 and self.constraints[1] == 0:
-            raise LayoutError("Expanded was given unbounded height")
-
         # layout all non expanded children
         min_size = 0
         for i in range(len(modifier.children)):
@@ -643,6 +670,79 @@ class Column(MultipleChildrenWidget):
                                        (provider.size.width, provider.size.height), 0)
 
 
+class UnboundedColumn(MultipleChildrenWidget):
+    def __init__(self,
+                 children: list[Widget],
+                 scroll_position: int = 0,
+                 cross_axis_alignment: callable = CrossAxisAlignment.center):
+        super().__init__()
+        self.children = children
+        self._children_position = [Position(0, 0) for _ in range(len(self.children))]
+        self.children_position = [Position(0, 0) for _ in range(len(self.children))]
+        self.cross_axis_alignement = cross_axis_alignment
+        self.scroll_position = scroll_position
+
+    def layout(self, new: 'Column' = None):
+        if new is not None:
+            provider = new
+            if self.tree_as_changed(new):
+                modifier = new
+            else:
+                modifier = self
+        else:
+            modifier = provider = self
+
+        provider.size.height = self.constraints[1]
+        if provider.size.height == 0:
+            raise LayoutError("ListView was given unbounded height")
+
+        for i in range(len(modifier.children)):
+            modifier.children[i].constraints = (self.constraints[0], 0)
+            modifier.children[i].layout(
+                provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
+            provider.size.width = max(provider.size.width, provider.children[i].size.width)
+
+        MainAxisAlignment.start(provider.children, provider._children_position,
+                                (provider.size.width, 0), 1)
+        provider.cross_axis_alignement(provider.children, provider._children_position,
+                                       (provider.size.width, provider.size.height), 0)
+        for y in range(len(provider.children)):
+            provider.children_position[y].set(1, provider._children_position[y].y - provider.scroll_position)
+
+    def composite(self, new: 'UnboundedColumn' = None) -> bool:
+        value = super().composite(new)
+        if new is not None:
+            if not value and self.scroll_position != new.scroll_position:
+                self.image = Image.new("RGBA", (new.size.width, new.size.height), (0, 0, 0, 0))
+                for i in range(len(self.children)):
+                    self.image.alpha_composite(self.children[i].image, (new.children_position[i].x,
+                                                                        new.children_position[i].y))
+                return True
+        return value
+
+
+class ListView(StateFullWidget):
+    def __init__(self, children: list[Widget]):
+        super().__init__()
+        self.scroll_position = 0
+        self.children = children
+
+    def build(self) -> Widget:
+        return UnboundedColumn(
+            children=self.children,
+            scroll_position=self.scroll_position,
+        )
+
+    def register_events(self, absolute_position: Position, state: 'StateFullWidget',
+                        new: 'ListView' = None):
+        Event.registered_events["<MouseWheel>"].append(self.on_scroll)
+        super().register_events(absolute_position, state, new)
+
+    def on_scroll(self, event):
+        self.scroll_position += event.delta * 10
+        self.main_state.set_state()
+
+
 class Row(Column):
     def layout(self, new: 'Row' = None):
         if new is not None:
@@ -660,9 +760,6 @@ class Row(Column):
         for child in modifier.children:
             if isinstance(child, Expanded):
                 flexs.append(child.flex)
-
-        if len(flexs) > 0 and self.constraints[0] == 0:
-            raise LayoutError("Expanded was given unbounded width")
 
         # layout all non expanded children
         min_size = 0
