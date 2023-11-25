@@ -1,8 +1,7 @@
-import tkinter
 import widget
-from sys import platform
 from color import Color, Colors
 from icon import Icons
+import pygame
 
 
 class FontFamilies:
@@ -40,37 +39,60 @@ class AppSettings:
 
 
 def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget = None):
-    root = tkinter.Tk()
-    root.title(settings.title)
-    # set the window size
-    root.geometry(settings.geometry)
+    pygame.init()
+    pygame.display.set_caption(settings.title)
+    screen = pygame.display.set_mode((settings.width, settings.height))
     if settings.maximized:
-        root.geometry(f"{root.winfo_screenwidth()}x{root.winfo_screenheight()}")
-        if platform == "linux" or platform == "linux2":
-            root.attributes('-zoomed', True)
-        else:
-            root.state('zoomed')
-    root.minsize(settings.minWidth, settings.minHeight)
-
-    canvas = tkinter.Canvas(root, width=root.winfo_screenwidth(),
-                            height=root.winfo_screenheight(),
-                            bg=settings.theme.background_color.hexadecimal,
-                            highlightthickness=0)
-    canvas.pack()
-    root.update()
+        screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
+    clock = pygame.time.Clock()
     if child is not None:
-        child.first_state((root.winfo_width(), root.winfo_height()), root, canvas)
-
-    root.mainloop()
+        child.first_state(screen.get_size())
+        while True:
+            clock.tick(60)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    widget.Event.on_click(event)
+                if event.type == pygame.MOUSEMOTION:
+                    widget.Event.on_motion(event)
+                if event.type == pygame.MOUSEWHEEL:
+                    # print(event)
+                    widget.Event.on_scroll(event)
+            screen.fill((255, 255, 255))
+            image = pygame.image.frombytes(child.image_bytes, child.image.size, "RGBA")
+            screen.blit(image, (0, 0))
+            pygame.display.flip()
 
 
 class Test(widget.StateFullWidget):
+    def __init__(self):
+        super().__init__()
+        self.children = [
+            widget.Text("0", font_size=50)
+        ]
+        self.count = 0
+
     def build(self) -> widget.Widget:
-        return widget.ListView(
-            children=[
-                widget.Text(str(x), color=Colors.blue, font_size=50) for x in range(50)
-            ]
+        return widget.Container(
+            padding=widget.EdgeInsets.all(10),
+            child=widget.Column(
+                children=[
+                    widget.FilledButton(text=widget.Text("ah"), on_click=self.add),
+                    widget.Expanded(
+                        child=widget.ListView(
+                            children=self.children
+                        )
+                    )
+                ]
+            )
         )
+
+    def add(self):
+        self.count += 1
+        self.children.append(widget.Text(str(self.count), font_size=50))
+        self.refresh()
 
 
 if __name__ == '__main__':

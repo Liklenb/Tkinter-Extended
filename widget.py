@@ -1,9 +1,8 @@
 from dataclasses import dataclass
-from PIL import Image, ImageFont, ImageDraw, ImageTk
+from PIL import Image, ImageFont, ImageDraw
 from colorama import Fore, Style
 from color import Color, Colors
-import tkinter
-from sys import platform
+import pygame
 
 
 class LayoutError(Exception):
@@ -73,29 +72,17 @@ class Event:
     }
 
     @staticmethod
-    def on_click(event: tkinter.Event):
+    def on_click(event: pygame.event.Event):
         for func in Event.registered_events["<Button-1>"]:
             func(event)
 
     @staticmethod
-    def on_motion(event: tkinter.Event):
+    def on_motion(event: pygame.event.Event):
         for func in Event.registered_events["<Motion>"]:
             func(event)
 
     @staticmethod
-    def on_scroll(event: tkinter.Event):
-        for func in Event.registered_events["<MouseWheel>"]:
-            func(event)
-
-    @staticmethod
-    def on_scroll_down(event: tkinter.Event):
-        event.delta = -1
-        for func in Event.registered_events["<MouseWheel>"]:
-            func(event)
-
-    @staticmethod
-    def on_scroll_up(event: tkinter.Event):
-        event.delta = 1
+    def on_scroll(event: pygame.event.Event):
         for func in Event.registered_events["<MouseWheel>"]:
             func(event)
 
@@ -205,6 +192,7 @@ class MultipleChildrenWidget(Widget):
                 self.image.alpha_composite(new.children[i].image,
                                            (new.children_position[i].x, new.children_position[i].y))
             self.children = new.children
+            self.size = new.size
             return True
         else:
             need_composite = False
@@ -216,6 +204,7 @@ class MultipleChildrenWidget(Widget):
                 for i in range(len(self.children)):
                     self.image.alpha_composite(self.children[i].image, (new.children_position[i].x,
                                                                         new.children_position[i].y))
+                self.size = new.size
                 return True
             return False
 
@@ -238,8 +227,8 @@ class SingleChildWidget(Widget):
 
     def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'SingleChildWidget' = None):
         if new is not None:
-            new.child.register_events(Position(absolute_position.x + self.child_position.x,
-                                               absolute_position.y + self.child_position.y), state, new.child)
+            self.child.register_events(Position(absolute_position.x + self.child_position.x,
+                                                absolute_position.y + self.child_position.y), state, new.child)
         else:
             self.child.register_events(Position(absolute_position.x + self.child_position.x,
                                                 absolute_position.y + self.child_position.y), state)
@@ -269,9 +258,7 @@ class StateFullWidget(SingleChildWidget):
     new_child: Widget = None
     main_state: 'StateFullWidget'
 
-    garbage: ImageTk.PhotoImage
-    canvas: tkinter.Canvas
-    root: tkinter.Tk
+    image_bytes: bytes
 
     def build(self) -> Widget:
         pass
@@ -282,31 +269,17 @@ class StateFullWidget(SingleChildWidget):
         self.register_events(Position(0, 0), self)
         self.draw()
         self.composite()
-        self.canvas.delete("all")
-        self.garbage = ImageTk.PhotoImage(self.image)
-        self.canvas.create_image(0, 0, image=self.garbage, anchor=tkinter.NW)
-        self.root.update()
+        self.image_bytes = self.image.tobytes()
 
-    def first_state(self, constraints: tuple[int, int], root: tkinter.Tk, canvas: tkinter.Canvas):
-        self.canvas = canvas
-        self.root = root
+    def first_state(self, constraints: tuple[int, int]):
         self.constraints = constraints
         self.layout()
         self.register_events(Position(0, 0), self)
-        # register events
-        self.canvas.bind("<Button-1>", Event.on_click)
-        self.canvas.bind("<Motion>", Event.on_motion)
-        if platform == "linux" or platform == "linux2":
-            root.bind("<5>", Event.on_scroll_up)
-            root.bind("<4>", Event.on_scroll_down)
-        else:
-            root.bind("<MouseWheel>", Event.on_scroll)
         self.draw()
         self.composite()
-        self.garbage = ImageTk.PhotoImage(self.child.image)
-        self.canvas.create_image(0, 0, image=self.garbage, anchor=tkinter.NW)
+        self.image_bytes = self.image.tobytes()
 
-    def layout(self, new: 'Widget' = None):
+    def layout(self, new: 'StateFullWidget' = None):
         if self.child is None:
             self.child = self.build()
         else:
@@ -316,7 +289,7 @@ class StateFullWidget(SingleChildWidget):
         if new is None:
             self.size = self.child.size
         else:
-            new.size = self.child.size
+            new.size = self.new_child.size
 
     def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'Widget' = None):
         self.main_state = state
@@ -597,6 +570,7 @@ class Expanded(SingleChildWidget):
                 self.image = Image.new("RGBA", (new.size.width, new.size.height), (0, 0, 0, 0))
                 self.image.alpha_composite(new.child.image, (0, 0))
                 self.child = new.child
+                self.size = new.size
                 return True
             return False
         else:
@@ -604,6 +578,7 @@ class Expanded(SingleChildWidget):
                 self.flex = new.flex
                 self.image = Image.new("RGBA", (new.size.width, new.size.height), (0, 0, 0, 0))
                 self.image.alpha_composite(self.child.image, (0, 0))
+                self.size = new.size
                 return True
             return False
 
@@ -614,7 +589,7 @@ class Column(MultipleChildrenWidget):
                  main_axis_alignment: callable = MainAxisAlignment.start,
                  cross_axis_alignment: callable = CrossAxisAlignment.center):
         super().__init__()
-        self.children = children
+        self.children = children.copy()
         self.children_position = [Position(0, 0) for _ in range(len(self.children))]
         self.main_axis_alignement = main_axis_alignment
         self.cross_axis_alignement = cross_axis_alignment
@@ -676,7 +651,7 @@ class UnboundedColumn(MultipleChildrenWidget):
                  scroll_position: int = 0,
                  cross_axis_alignment: callable = CrossAxisAlignment.center):
         super().__init__()
-        self.children = children
+        self.children = children.copy()
         self._children_position = [Position(0, 0) for _ in range(len(self.children))]
         self.children_position = [Position(0, 0) for _ in range(len(self.children))]
         self.cross_axis_alignement = cross_axis_alignment
@@ -694,19 +669,22 @@ class UnboundedColumn(MultipleChildrenWidget):
 
         provider.size.height = self.constraints[1]
         if provider.size.height == 0:
-            raise LayoutError("ListView was given unbounded height")
+            raise LayoutError("ListView was given unbounded height.")
 
+        full_size = 0
         for i in range(len(modifier.children)):
             modifier.children[i].constraints = (self.constraints[0], 0)
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
             provider.size.width = max(provider.size.width, provider.children[i].size.width)
-
+            full_size += provider.children[i].size.height
         MainAxisAlignment.start(provider.children, provider._children_position,
                                 (provider.size.width, 0), 1)
         provider.cross_axis_alignement(provider.children, provider._children_position,
                                        (provider.size.width, provider.size.height), 0)
-        for y in range(len(provider.children)):
+        provider.scroll_position = min(max(0, provider.scroll_position), max(full_size - provider.size.height, 0))
+        provider.children_position = provider._children_position.copy()
+        for y in range(len(modifier.children)):
             provider.children_position[y].set(1, provider._children_position[y].y - provider.scroll_position)
 
     def composite(self, new: 'UnboundedColumn' = None) -> bool:
@@ -717,6 +695,7 @@ class UnboundedColumn(MultipleChildrenWidget):
                 for i in range(len(self.children)):
                     self.image.alpha_composite(self.children[i].image, (new.children_position[i].x,
                                                                         new.children_position[i].y))
+                self.scroll_position = new.scroll_position
                 return True
         return value
 
@@ -726,21 +705,42 @@ class ListView(StateFullWidget):
         super().__init__()
         self.scroll_position = 0
         self.children = children
+        self.absolute_position = Position(0, 0)
+        self.hover = False
 
     def build(self) -> Widget:
         return UnboundedColumn(
             children=self.children,
-            scroll_position=self.scroll_position,
+            scroll_position=self.scroll_position
         )
 
     def register_events(self, absolute_position: Position, state: 'StateFullWidget',
                         new: 'ListView' = None):
+        self.absolute_position = absolute_position
         Event.registered_events["<MouseWheel>"].append(self.on_scroll)
+        Event.registered_events["<Motion>"].append(self._on_hover)
         super().register_events(absolute_position, state, new)
 
     def on_scroll(self, event):
-        self.scroll_position += event.delta * 10
-        self.main_state.set_state()
+        if self.hover:
+            self.scroll_position = self.child.scroll_position + (-event.y * 20)
+            self.main_state.set_state()
+
+    def _on_hover(self, event: pygame.event.Event):
+        if not self.hover and \
+                self.child.size.width + self.absolute_position.x > event.pos[0] > self.absolute_position.x and \
+                self.child.size.height + self.absolute_position.y > event.pos[1] > self.absolute_position.y:
+            self.hover = True
+        elif self.hover and not \
+                (self.child.size.width + self.absolute_position.x > event.pos[0] > self.absolute_position.x and
+                 self.child.size.height + self.absolute_position.y > event.pos[1] > self.absolute_position.y):
+            self.hover = False
+
+    def composite(self, new: 'ListView' = None) -> bool:
+        value = super().composite(new)
+        if new is not None:
+            self.children = new.children
+        return value
 
 
 class Row(Column):
@@ -928,22 +928,22 @@ class InkWell(SingleChildWidget):
         self.on_hover = on_hover
         self.hover = False
 
-    def _on_hover(self, event: tkinter.Event):
+    def _on_hover(self, event: pygame.event.Event):
         if self.on_hover is not None and not self.hover and \
-                self.child.size.width + self.absolute_position.x > event.x > self.absolute_position.x and \
-                self.child.size.height + self.absolute_position.y > event.y > self.absolute_position.y:
+                self.child.size.width + self.absolute_position.x > event.pos[0] > self.absolute_position.x and \
+                self.child.size.height + self.absolute_position.y > event.pos[1] > self.absolute_position.y:
             self.hover = True
             self.on_hover(True)
         elif self.on_hover is not None and self.hover and not \
-                (self.child.size.width + self.absolute_position.x > event.x > self.absolute_position.x and
-                 self.child.size.height + self.absolute_position.y > event.y > self.absolute_position.y):
+                (self.child.size.width + self.absolute_position.x > event.pos[0] > self.absolute_position.x and
+                 self.child.size.height + self.absolute_position.y > event.pos[1] > self.absolute_position.y):
             self.hover = False
             self.on_hover(False)
 
-    def _on_click(self, event: tkinter.Event):
+    def _on_click(self, event: pygame.event.Event):
         if self.on_click is not None and \
-                self.child.size.width + self.absolute_position.x > event.x > self.absolute_position.x and \
-                self.child.size.height + self.absolute_position.y > event.y > self.absolute_position.y:
+                self.child.size.width + self.absolute_position.x > event.pos[0] > self.absolute_position.x and \
+                self.child.size.height + self.absolute_position.y > event.pos[1] > self.absolute_position.y:
             self.on_click()
 
     def layout(self, new: 'InkWell' = None):
@@ -982,6 +982,10 @@ class FilledButton(StateFullWidget):
         self.background_color = Color.alpha_blend(self.color, Colors.white.with_opacity(0.2))
         self.text = text
         self.on_click = on_click
+
+    def layout(self, new: 'Widget' = None):
+        self.constraints = (0, 0)
+        super().layout(new)
 
     def build(self) -> Widget:
         return InkWell(
