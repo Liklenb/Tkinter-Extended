@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE instance-profile
+        SYSTEM "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd">
+
+<instance-profile id="main"
+                 name="Tkinter Extended"
+                 start-page="starter-topic.md">
+
+    <toc-element topic="starter-topic.md"/>
+    <toc-element topic="Widget-gallery.md">
+        <toc-element topic="Structure-widgets.md">
+            <toc-element toc-title="MultipleChildrenWidget">
+                <toc-element topic="column.md"/>
+                <toc-element topic="row.md"/>
+                <toc-element toc-title="Manage remaining space">
+                    <toc-element topic="Expanded.md"/>
+                    <toc-element topic="MainAxisAlignment.md"/>
+                    <toc-element topic="CrossAxisAlignment.md"/>
+                </toc-element>
+            </toc-element>
+            <toc-element topic="ListView.md"/>
+            <toc-element toc-title="SingleChildWidget">
+                <toc-element topic="Container.md">
+                    <toc-element topic="EdgeInsets.md"/>
+                </toc-element>
+                <toc-element topic="Center.md"/>
+            </toc-element>
+        </toc-element>
+        <toc-element topic="Content-widgets.md">
+            <toc-element topic="Text.md"/>
+            <toc-element topic="FileImage.md"/>
+            <toc-element topic="Icon.md">
+                <toc-element topic="Icons.md"/>
+            </toc-element>
+        </toc-element>
+        <toc-element topic="Input-widgets.md">
+            <toc-element topic="FilledButton.md"/>
+            <toc-element topic="IconButton.md"/>
+            <toc-element topic="InkWell.md"/>
+        </toc-element>
+    </toc-element>
+    <toc-element topic="Color.md">
+        <toc-element topic="Colors.md"/>
+    </toc-element>
+    <toc-element topic="Size.md"/>
+</instance-profile>

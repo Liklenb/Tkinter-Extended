@@ -38,7 +38,7 @@ class AppSettings:
         self.theme = theme
 
 
-def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget = None):
+def run_app(settings: AppSettings = AppSettings(), child: widget.StatefulWidget = None):
     pygame.init()
     pygame.display.set_caption(settings.title)
     screen = pygame.display.set_mode((settings.width, settings.height))
@@ -66,7 +66,7 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StateFullWidget
             pygame.display.flip()
 
 
-class Test(widget.StateFullWidget):
+class Test(widget.StatefulWidget):
     def __init__(self):
         super().__init__()
         self.children = [
@@ -75,19 +75,10 @@ class Test(widget.StateFullWidget):
         self.count = 0
 
     def build(self) -> widget.Widget:
-        return widget.Container(
-            padding=widget.EdgeInsets.all(10),
-            child=widget.Column(
-                children=[
-                    widget.FilledButton(text=widget.Text("ah"), on_click=self.add),
-                    widget.Expanded(
-                        child=widget.ListView(
-                            children=self.children
-                        )
-                    )
-                ]
-            )
-        )
+        return widget.ListView(
+            cross_axis_alignment=widget.CrossAxisAlignment.start,
+    children=[widget.Text(str(x), font_size=50) for x in range(100)]
+)
 
     def add(self):
         self.count += 1
@@ -96,6 +87,4 @@ class Test(widget.StateFullWidget):
 
 
 if __name__ == '__main__':
-    run_app(child=Test(), settings=AppSettings(
-        maximized=True,
-    ))
+    run_app(child=Test())

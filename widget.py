@@ -107,7 +107,7 @@ class Widget:
     def layout(self, new: 'Widget' = None):
         pass
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'Widget' = None):
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'Widget' = None):
         pass
 
     def draw(self, new: 'Widget' = None):
@@ -148,7 +148,7 @@ class MultipleChildrenWidget(Widget):
                 self.size.width = max(self.size.width, self.children[i].size.width)
                 self.size.height = max(self.size.height, self.children[i].size.height)
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget',
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget',
                         new: 'MultipleChildrenWidget' = None):
         if new is not None:
             if self.tree_as_changed(new):
@@ -225,7 +225,7 @@ class SingleChildWidget(Widget):
             self.child.layout(new.child)
             new.size = new.child.size
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'SingleChildWidget' = None):
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'SingleChildWidget' = None):
         if new is not None:
             self.child.register_events(Position(absolute_position.x + self.child_position.x,
                                                 absolute_position.y + self.child_position.y), state, new.child)
@@ -254,9 +254,9 @@ class SingleChildWidget(Widget):
             return False
 
 
-class StateFullWidget(SingleChildWidget):
+class StatefulWidget(SingleChildWidget):
     new_child: Widget = None
-    main_state: 'StateFullWidget'
+    main_state: 'StatefulWidget'
 
     image_bytes: bytes
 
@@ -279,7 +279,7 @@ class StateFullWidget(SingleChildWidget):
         self.composite()
         self.image_bytes = self.image.tobytes()
 
-    def layout(self, new: 'StateFullWidget' = None):
+    def layout(self, new: 'StatefulWidget' = None):
         if self.child is None:
             self.child = self.build()
         else:
@@ -291,7 +291,7 @@ class StateFullWidget(SingleChildWidget):
         else:
             new.size = self.new_child.size
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'Widget' = None):
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'Widget' = None):
         self.main_state = state
         self.child.register_events(absolute_position, state, self.new_child)
 
@@ -416,21 +416,58 @@ class Text(Widget):
         self.font_size = font_size
         self.font = ImageFont.truetype("assets/font_families/OpenSans/OpenSans.ttf", font_size)
         self.text_position: Position = Position(0, 0)
+        self.lines = []
 
     def layout(self, new: 'Text' = None):
         if new is not None and (self.text != new.text or self.font_size != new.font_size):
             if self.font_size != new.font_size:
                 self.font = ImageFont.truetype("assets/font_families/OpenSans/OpenSans.ttf", new.font_size)
-            box = self.font.getbbox(new.text)
-            new.size = Size(box[2] - box[0], box[3] - box[1])
-            new.text_position = Position(-box[0], -box[1])
+            # cut the text to fit the width
+            new.lines = Text.cut_in_lines(new.text, self.constraints[0], new.font)
+            for line in new.lines:
+                box = new.font.getbbox(line)
+                new.size.width = max(new.size.width, box[2] - box[0])
+                new.size.height += box[3] + 1
+            top_padding = -self.font.getbbox(new.lines[0])[1]
+            new.size.height += top_padding
+            new.text_position = Position(0, top_padding)
         elif new is None:
-            box = self.font.getbbox(self.text)
-            self.size = Size(box[2] - box[0], box[3] - box[1])
-            self.text_position = Position(-box[0], -box[1])
+            self.lines = self.cut_in_lines(self.text, self.constraints[0], self.font)
+            for line in self.lines:
+                box = self.font.getbbox(line)
+                self.size.width = max(self.size.width, box[2] - box[0])
+                self.size.height += box[3] + 1
+            top_padding = -self.font.getbbox(self.lines[0])[1]
+            self.size.height += top_padding
+            self.text_position = Position(0, top_padding)
         else:
             new.size = self.size
             new.text_position = self.text_position
+
+    @staticmethod
+    def cut_in_lines(text: str, width: int, font: ImageFont) -> list[str]:
+        if width == 0:
+            return [text]
+        lines = []
+        for line in text.split("\n"):
+            box = font.getbbox(line)
+            if box[2] - box[0] > width:
+                words = line.split(" ")
+                new_line = ""
+                if len(words) < 2:
+                    lines.append(line)
+                    continue
+                for word in words:
+                    box = font.getbbox(new_line + word)
+                    if box[2] - box[0] > width:
+                        lines.append(new_line)
+                        new_line = word + " "
+                    else:
+                        new_line += word + " "
+                lines.append(new_line)
+            else:
+                lines.append(line)
+        return lines
 
     def draw(self, new: 'Text' = None):
         if new is None or self.text != new.text or self.color != new.color or self.font_size != new.font_size:
@@ -440,8 +477,8 @@ class Text(Widget):
                 provider = self
             self.image = Image.new("RGBA", (provider.size.width, provider.size.height), (255, 255, 255, 0))
             draw = ImageDraw.Draw(self.image)
-            draw.text((provider.text_position.x, provider.text_position.y), provider.text,
-                      font=self.font, fill=provider.color.hexadecimal)
+            draw.multiline_text((provider.text_position.x, provider.text_position.y), "\n".join(provider.lines),
+                                font=self.font, fill=provider.color.hexadecimal)
 
     def composite(self, new: 'Text' = None) -> bool:
         if new is not None and (self.text != new.text or self.color != new.color or self.font_size != new.font_size):
@@ -700,21 +737,23 @@ class UnboundedColumn(MultipleChildrenWidget):
         return value
 
 
-class ListView(StateFullWidget):
-    def __init__(self, children: list[Widget]):
+class ListView(StatefulWidget):
+    def __init__(self, children: list[Widget], cross_axis_alignment: callable = CrossAxisAlignment.center):
         super().__init__()
         self.scroll_position = 0
         self.children = children
+        self.cross_axis_alignement = cross_axis_alignment
         self.absolute_position = Position(0, 0)
         self.hover = False
 
     def build(self) -> Widget:
         return UnboundedColumn(
             children=self.children,
-            scroll_position=self.scroll_position
+            scroll_position=self.scroll_position,
+            cross_axis_alignment=self.cross_axis_alignement
         )
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget',
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget',
                         new: 'ListView' = None):
         self.absolute_position = absolute_position
         Event.registered_events["<MouseWheel>"].append(self.on_scroll)
@@ -809,7 +848,7 @@ class Center(SingleChildWidget):
             self.child.layout(new.child)
             new.size = Size(self.constraints[0], self.constraints[1])
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'Center' = None):
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'Center' = None):
         self.child.register_events(
             Position(absolute_position.x + (
                     (new if new is not None else self).size.width - self.child.size.width) // 2,
@@ -882,7 +921,7 @@ class Container(SingleChildWidget):
         provider.child_position = Position(provider.padding.left + provider.border_width + provider.border_radius // 2,
                                            provider.padding.top + provider.border_width + provider.border_radius // 2)
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'Container' = None):
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'Container' = None):
         self.child.register_events(Position(absolute_position.x + self.child_position.x,
                                             absolute_position.y + self.child_position.y), state,
                                    new.child if new is not None else None)
@@ -954,7 +993,7 @@ class InkWell(SingleChildWidget):
         else:
             self.size = self.child.size
 
-    def register_events(self, absolute_position: Position, state: 'StateFullWidget', new: 'InkWell' = None):
+    def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'InkWell' = None):
         if new is not None and new.on_hover != self.on_hover:
             new.absolute_position = absolute_position
             Event.registered_events["<Button-1>"].append(new._on_click)
@@ -975,7 +1014,7 @@ class InkWell(SingleChildWidget):
         return False
 
 
-class FilledButton(StateFullWidget):
+class FilledButton(StatefulWidget):
     def __init__(self, text: Text, on_click: callable = lambda: None, color: Color = Colors.blue):
         super().__init__()
         self.color = color
@@ -1011,7 +1050,7 @@ class FilledButton(StateFullWidget):
         self.main_state.set_state()
 
 
-class IconButton(StateFullWidget):
+class IconButton(StatefulWidget):
     def __init__(self, icon: Icon, on_click: callable = lambda: None, color: Color = Colors.blue):
         super().__init__()
         self.color = color
