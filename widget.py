@@ -1,8 +1,11 @@
+import asyncio
+import time
 from dataclasses import dataclass
 from PIL import Image, ImageFont, ImageDraw
 from colorama import Fore, Style
 from color import Color, Colors
 import pygame
+import os
 
 
 class LayoutError(Exception):
@@ -263,7 +266,7 @@ class StatefulWidget(SingleChildWidget):
     def build(self) -> Widget:
         pass
 
-    def set_state(self):
+    async def set_state(self):
         self.layout()
         Event.clear()
         self.register_events(Position(0, 0), self)
@@ -307,7 +310,7 @@ class StatefulWidget(SingleChildWidget):
         return False
 
     def refresh(self):
-        self.main_state.set_state()
+        asyncio.run(self.main_state.set_state())
 
 
 class MainAxisAlignment:
@@ -414,14 +417,14 @@ class Text(Widget):
         self.text = text
         self.color = color
         self.font_size = font_size
-        self.font = ImageFont.truetype("assets/font_families/OpenSans/OpenSans.ttf", font_size)
+        self.font = ImageFont.truetype(f"{os.path.split(os.path.relpath(__file__))[0]}/assets/font_families/OpenSans/OpenSans.ttf", font_size)
         self.text_position: Position = Position(0, 0)
         self.lines = []
 
     def layout(self, new: 'Text' = None):
         if new is not None and (self.text != new.text or self.font_size != new.font_size):
             if self.font_size != new.font_size:
-                self.font = ImageFont.truetype("assets/font_families/OpenSans/OpenSans.ttf", new.font_size)
+                self.font = ImageFont.truetype(f"{os.path.split(os.path.relpath(__file__))[0]}/assets/font_families/OpenSans/OpenSans.ttf", new.font_size)
             # cut the text to fit the width
             new.lines = Text.cut_in_lines(new.text, self.constraints[0], new.font)
             for line in new.lines:
@@ -440,9 +443,6 @@ class Text(Widget):
             top_padding = -self.font.getbbox(self.lines[0])[1]
             self.size.height += top_padding
             self.text_position = Position(0, top_padding)
-        else:
-            new.size = self.size
-            new.text_position = self.text_position
 
     @staticmethod
     def cut_in_lines(text: str, width: int, font: ImageFont) -> list[str]:
@@ -524,8 +524,6 @@ class FileImage(Widget):
                     self.image = self.image.resize(new.size.get())
                 else:
                     new.size = Size(self.image.width, self.image.height)
-            else:
-                new.size = self.size
 
     def composite(self, new: 'FileImage' = None) -> bool:
         if new is None:
@@ -541,7 +539,7 @@ class FileImage(Widget):
 
 class Icon(FileImage):
     def __init__(self, icon: str, size: int = 20, color: Color = Colors.black):
-        super().__init__(icon, size=Size(size, size))
+        super().__init__(f"{os.path.split(os.path.relpath(__file__))[0]}/{icon}", size=Size(size, size))
         self.color = color
 
     def as_changed(self, new: 'Icon'):
@@ -555,7 +553,7 @@ class Icon(FileImage):
             else:
                 provider = new
             color_mask = Image.new("RGBA", (provider.size.get()),
-                                   color=provider.color.rgb)
+                                   color=provider.color.rgba)
             self.image.paste(color_mask, (0, 0), self.image)
 
     def composite(self, new: 'Icon' = None) -> bool:
@@ -642,6 +640,7 @@ class Column(MultipleChildrenWidget):
             modifier = provider = self
 
         provider.size.height = self.constraints[1]
+        provider.size.width = self.constraints[0]
 
         flexs = []
         for child in modifier.children:
@@ -656,7 +655,8 @@ class Column(MultipleChildrenWidget):
             modifier.children[i].constraints = (self.constraints[0], 0)
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
-            provider.size.width = max(provider.size.width, provider.children[i].size.width)
+            if self.constraints[0] == 0:
+                provider.size.width = max(provider.size.width, provider.children[i].size.width)
             min_size += provider.children[i].size.height
 
         # layout all expanded children
@@ -669,7 +669,8 @@ class Column(MultipleChildrenWidget):
                     j] // sum(flexs)))
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
-            provider.size.width = max(provider.size.width, provider.children[i].size.width)
+            if self.constraints[0] == 0:
+                provider.size.width = max(provider.size.width, provider.children[i].size.width)
             if isinstance(modifier.children[i], Expanded):
                 j += 1
 
@@ -688,11 +689,12 @@ class UnboundedColumn(MultipleChildrenWidget):
                  scroll_position: int = 0,
                  cross_axis_alignment: callable = CrossAxisAlignment.center):
         super().__init__()
-        self.children = children.copy()
+        self.children = children
         self._children_position = [Position(0, 0) for _ in range(len(self.children))]
         self.children_position = [Position(0, 0) for _ in range(len(self.children))]
         self.cross_axis_alignement = cross_axis_alignment
         self.scroll_position = scroll_position
+        self.skip_layout = False
 
     def layout(self, new: 'Column' = None):
         if new is not None:
@@ -705,15 +707,18 @@ class UnboundedColumn(MultipleChildrenWidget):
             modifier = provider = self
 
         provider.size.height = self.constraints[1]
+        provider.size.width = self.constraints[0]
         if provider.size.height == 0:
             raise LayoutError("ListView was given unbounded height.")
 
         full_size = 0
         for i in range(len(modifier.children)):
-            modifier.children[i].constraints = (self.constraints[0], 0)
-            modifier.children[i].layout(
-                provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
-            provider.size.width = max(provider.size.width, provider.children[i].size.width)
+            if not self.skip_layout:
+                modifier.children[i].constraints = (self.constraints[0], 0)
+                modifier.children[i].layout(
+                    provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
+                if self.constraints[0] == 0:
+                    provider.size.width = max(provider.size.width, provider.children[i].size.width)
             full_size += provider.children[i].size.height
         MainAxisAlignment.start(provider.children, provider._children_position,
                                 (provider.size.width, 0), 1)
@@ -723,16 +728,26 @@ class UnboundedColumn(MultipleChildrenWidget):
         provider.children_position = provider._children_position.copy()
         for y in range(len(modifier.children)):
             provider.children_position[y].set(1, provider._children_position[y].y - provider.scroll_position)
+        if self.skip_layout:
+            self.skip_layout = False
 
     def composite(self, new: 'UnboundedColumn' = None) -> bool:
         value = super().composite(new)
         if new is not None:
             if not value and self.scroll_position != new.scroll_position:
+                current_position = 0
                 self.image = Image.new("RGBA", (new.size.width, new.size.height), (0, 0, 0, 0))
                 for i in range(len(self.children)):
+                    if current_position < new.scroll_position:
+                        current_position += new.children[i].size.height
+                        continue
                     self.image.alpha_composite(self.children[i].image, (new.children_position[i].x,
                                                                         new.children_position[i].y))
+                    current_position += new.children[i].size.height
+                    if current_position > new.size.height + new.scroll_position:
+                        break
                 self.scroll_position = new.scroll_position
+                self.scroll_position_changed = False
                 return True
         return value
 
@@ -763,7 +778,8 @@ class ListView(StatefulWidget):
     def on_scroll(self, event):
         if self.hover:
             self.scroll_position = self.child.scroll_position + (-event.y * 20)
-            self.main_state.set_state()
+            self.child.skip_layout = True
+            asyncio.run(self.main_state.set_state())
 
     def _on_hover(self, event: pygame.event.Event):
         if not self.hover and \
@@ -794,6 +810,7 @@ class Row(Column):
             modifier = provider = self
 
         provider.size.width = self.constraints[0]
+        provider.size.height = self.constraints[1]
 
         flexs = []
         for child in modifier.children:
@@ -808,7 +825,8 @@ class Row(Column):
             modifier.children[i].constraints = (0, self.constraints[1])
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
-            provider.size.height = max(provider.size.height, provider.children[i].size.height)
+            if self.constraints[1] == 0:
+                provider.size.height = max(provider.size.height, provider.children[i].size.height)
             min_size += provider.children[i].size.width
 
         # layout all expanded children
@@ -821,7 +839,8 @@ class Row(Column):
                                                 self.constraints[1])
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
-            provider.size.height = max(provider.size.height, provider.children[i].size.height)
+            if self.constraints[1] == 0:
+                provider.size.height = max(provider.size.height, provider.children[i].size.height)
             if isinstance(modifier.children[i], Expanded):
                 j += 1
         if provider.size.width == 0:
@@ -931,13 +950,13 @@ class Container(SingleChildWidget):
             self._image = Image.new("RGBA", (self.size.width, self.size.height), (0, 0, 0, 0))
             draw = ImageDraw.Draw(self._image)
             draw.rounded_rectangle((0, 0, self.size.width - 1, self.size.height - 1),
-                                   self.border_radius, fill=self.background_color.rgb, outline=self.border_color.rgb,
+                                   self.border_radius, fill=self.background_color.rgba, outline=self.border_color.rgba,
                                    width=self.border_width)
         elif self.as_changed(new):
             self._image = Image.new("RGBA", (new.size.width, new.size.height), (0, 0, 0, 0))
             draw = ImageDraw.Draw(self._image)
             draw.rounded_rectangle((0, 0, new.size.width - 1, new.size.height - 1),
-                                   new.border_radius, fill=new.background_color.rgb, outline=new.border_color.rgb,
+                                   new.border_radius, fill=new.background_color.rgba, outline=new.border_color.rgba,
                                    width=new.border_width)
         self.child.draw(new.child if new is not None else None)
 
@@ -1040,14 +1059,14 @@ class FilledButton(StatefulWidget):
 
     def _on_click(self):
         self.on_click()
-        self.main_state.set_state()
+        asyncio.run(self.main_state.set_state())
 
     def _on_hover(self, hover: bool):
         if hover:
             self.background_color = self.color
         else:
             self.background_color = Color.alpha_blend(self.color, Colors.white.with_opacity(0.2))
-        self.main_state.set_state()
+        asyncio.run(self.main_state.set_state())
 
 
 class IconButton(StatefulWidget):
@@ -1075,11 +1094,11 @@ class IconButton(StatefulWidget):
 
     def _on_click(self):
         self.on_click()
-        self.main_state.set_state()
+        asyncio.run(self.main_state.set_state())
 
     def _on_hover(self, hover: bool):
         if hover:
             self.background_color = self.color.with_opacity(0.1)
         else:
             self.background_color = Colors.transparent
-        self.main_state.set_state()
+        asyncio.run(self.main_state.set_state())
