@@ -31,11 +31,29 @@ class AppSettings:
         self.title = title
         self.width = width
         self.height = height
-        self.geometry = f"{width}x{height}"
         self.minWidth = min_width
         self.minHeight = min_height
         self.maximized = maximized
         self.theme = theme
+
+
+class Navigator:
+    _pages = []
+    size = (0, 0)
+
+    @staticmethod
+    def push(new_page: widget.StatefulWidget) -> None:
+        new_page.first_state(Navigator.size)
+        Navigator._pages.append(new_page)
+
+    @staticmethod
+    def pop() -> None:
+        Navigator._pages.pop()
+        Navigator.get_current().first_state(Navigator.size)
+
+    @staticmethod
+    def get_current() -> widget.StatefulWidget:
+        return Navigator._pages[-1]
 
 
 def run_app(settings: AppSettings = AppSettings(), child: widget.StatefulWidget = None):
@@ -44,9 +62,11 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StatefulWidget 
     screen = pygame.display.set_mode((settings.width, settings.height))
     if settings.maximized:
         screen = pygame.display.set_mode((0, 0), pygame.RESIZABLE)
+    pygame.display.set_icon(pygame.image.load("assets/icon.png"))
     clock = pygame.time.Clock()
     if child is not None:
-        child.first_state(screen.get_size())
+        Navigator.size = screen.get_size()
+        Navigator.push(child)
         while True:
             clock.tick(60)
             for event in pygame.event.get():
@@ -61,30 +81,7 @@ def run_app(settings: AppSettings = AppSettings(), child: widget.StatefulWidget 
                     # print(event)
                     widget.Event.on_scroll(event)
             screen.fill((255, 255, 255))
-            image = pygame.image.frombytes(child.image_bytes, child.image.size, "RGBA")
+            image = pygame.image.frombytes(Navigator.get_current().image_bytes, Navigator.get_current().image.size,
+                                           "RGBA")
             screen.blit(image, (0, 0))
             pygame.display.flip()
-
-
-class Test(widget.StatefulWidget):
-    def __init__(self):
-        super().__init__()
-        self.children = [
-            widget.Text("0", font_size=50)
-        ]
-        self.count = 0
-
-    def build(self) -> widget.Widget:
-        return widget.ListView(
-            cross_axis_alignment=widget.CrossAxisAlignment.start,
-    children=[widget.Text(str(x), font_size=50) for x in range(100)]
-)
-
-    def add(self):
-        self.count += 1
-        self.children.append(widget.Text(str(self.count), font_size=50))
-        self.refresh()
-
-
-if __name__ == '__main__':
-    run_app(child=Test())

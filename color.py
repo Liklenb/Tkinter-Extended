@@ -33,8 +33,7 @@ class Color:
             opacity = 1
         elif opacity < 0:
             opacity = 0
-        self.rgba = (self.rgba[0], self.rgba[1], self.rgba[2], int(opacity * 255))
-        return self
+        return Color((self.rgba[0], self.rgba[1], self.rgba[2], int(opacity * 255)))
 
     def __eq__(self, other):
         return self.rgba == other.rgba

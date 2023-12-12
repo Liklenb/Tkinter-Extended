@@ -1,5 +1,4 @@
 import asyncio
-import time
 from dataclasses import dataclass
 from PIL import Image, ImageFont, ImageDraw
 from colorama import Fore, Style
@@ -230,8 +229,8 @@ class SingleChildWidget(Widget):
 
     def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'SingleChildWidget' = None):
         if new is not None:
-            self.child.register_events(Position(absolute_position.x + self.child_position.x,
-                                                absolute_position.y + self.child_position.y), state, new.child)
+            self.child.register_events(Position(absolute_position.x + new.child_position.x,
+                                                absolute_position.y + new.child_position.y), state, new.child)
         else:
             self.child.register_events(Position(absolute_position.x + self.child_position.x,
                                                 absolute_position.y + self.child_position.y), state)
@@ -311,6 +310,20 @@ class StatefulWidget(SingleChildWidget):
 
     def refresh(self):
         asyncio.run(self.main_state.set_state())
+
+
+class BoxConstraints(SingleChildWidget):
+    def __init__(self, child: Widget, constraints: tuple[int, int]):
+        super().__init__()
+        self._constraints = constraints
+        self.child = child
+
+    def layout(self, new: 'BoxConstraints' = None):
+        if self._constraints[0] != 0:
+            self.constraints = (self._constraints[0], self.constraints[1])
+        if self._constraints[1] != 0:
+            self.constraints = (self.constraints[0], self._constraints[1])
+        super().layout(new)
 
 
 class MainAxisAlignment:
@@ -443,6 +456,10 @@ class Text(Widget):
             top_padding = -self.font.getbbox(self.lines[0])[1]
             self.size.height += top_padding
             self.text_position = Position(0, top_padding)
+        else:
+            new.lines = self.lines
+            new.size = self.size
+            new.text_position = self.text_position
 
     @staticmethod
     def cut_in_lines(text: str, width: int, font: ImageFont) -> list[str]:
@@ -507,7 +524,7 @@ class FileImage(Widget):
     def layout(self, new: 'FileImage' = None):
         if new is None:
             self.image = Image.open(self.path).convert("RGBA")
-            if not self.size.is_null():
+            if not self._size.is_null():
                 self.image = self.image.resize(self.size.get())
             else:
                 self.size = Size(self.image.width, self.image.height)
@@ -524,6 +541,8 @@ class FileImage(Widget):
                     self.image = self.image.resize(new.size.get())
                 else:
                     new.size = Size(self.image.width, self.image.height)
+            else:
+                new.size = self.size
 
     def composite(self, new: 'FileImage' = None) -> bool:
         if new is None:
@@ -594,7 +613,7 @@ class Expanded(SingleChildWidget):
                 new.size = Size(new.child.size.width,
                                 max(new.child.size.height, self.constraints[1]))
 
-    def composite(self, new: 'SingleChildWidget' = None) -> bool:
+    def composite(self, new: 'Expanded' = None) -> bool:
         if new is None:
             self.child.composite()
             self.image = Image.new("RGBA", (self.size.width, self.size.height), (0, 0, 0, 0))
@@ -643,7 +662,7 @@ class Column(MultipleChildrenWidget):
         provider.size.width = self.constraints[0]
 
         flexs = []
-        for child in modifier.children:
+        for child in provider.children:
             if isinstance(child, Expanded):
                 flexs.append(child.flex)
 
@@ -813,7 +832,7 @@ class Row(Column):
         provider.size.height = self.constraints[1]
 
         flexs = []
-        for child in modifier.children:
+        for child in provider.children:
             if isinstance(child, Expanded):
                 flexs.append(child.flex)
 
@@ -830,12 +849,35 @@ class Row(Column):
             min_size += provider.children[i].size.width
 
         # layout all expanded children
+        expanded_widths = []
+        avoid_overflow = 0
+        for flex in flexs:
+            expanded_width = (self.constraints[0] - min_size) * flex // sum(flexs)
+            if expanded_width == 0:
+                expanded_width = 1
+                avoid_overflow += 1
+            else:
+                while avoid_overflow > 0:
+                    expanded_width -= 1
+                    avoid_overflow -= 1
+            expanded_widths.append(expanded_width)
+        j = 0
+        while avoid_overflow > 0:
+            print('coucou')
+            if expanded_widths[j] > 1:
+                expanded_widths[j] -= 1
+                avoid_overflow -= 1
+            else:
+                j += 1
+                if j == len(expanded_widths):
+                    raise LayoutError("Flex repartition failed.")
+
         j = 0
         for i in range(len(modifier.children)):
             if not isinstance(modifier.children[i], Expanded):
                 continue
             modifier.children[i].axis = 0
-            modifier.children[i].constraints = ((self.constraints[0] - min_size) * flexs[j] // sum(flexs),
+            modifier.children[i].constraints = (expanded_widths[j],
                                                 self.constraints[1])
             modifier.children[i].layout(
                 provider.children[i] if new is not None and not self.tree_as_changed(new) else None)
@@ -893,7 +935,7 @@ class Center(SingleChildWidget):
 
 class Container(SingleChildWidget):
     def __init__(self,
-                 child: Widget,
+                 child: Widget = None,
                  background_color: Color = Colors.transparent,
                  padding: EdgeInsets = EdgeInsets.all(0),
                  border_radius: int = 0,
@@ -920,59 +962,83 @@ class Container(SingleChildWidget):
     def layout(self, new: 'Container' = None):
         provider = new if new is not None else self
         modifier = self
-        if new is not None and type(self.child) is not type(new.child):
+        if new is not None and self.child is not None and type(self.child) is not type(new.child):
             modifier = new
-        modifier.child.constraints = (max(0, self.constraints[
-            0] - provider.padding.left - provider.padding.right - provider.border_width * 2 - provider.border_radius),
-                                      max(0, self.constraints[
-                                          1] - provider.padding.top
-                                          - provider.padding.bottom - provider.border_width * 2
-                                          - provider.border_radius))
-        modifier.child.layout(provider.child if new is not None and type(self.child) is type(new.child) else None)
-        if 0 in self.constraints:
-            provider.size = Size(
-                modifier.child.size.width + provider.padding.left + provider.padding.right +
-                provider.border_width * 2 + provider.border_radius,
-                modifier.child.size.height + provider.padding.top + provider.padding.bottom +
-                provider.border_width * 2 + provider.border_radius)
-        else:
+        if self.child is not None:
+            modifier.child.constraints = (max(0, self.constraints[
+                0] - provider.padding.left - provider.padding.right - provider.border_width * 2 - (provider.border_radius if provider.child is Text else 0)),
+                                          max(0, self.constraints[
+                                              1] - provider.padding.top
+                                              - provider.padding.bottom - provider.border_width * 2
+                                              - (provider.border_radius if provider.child is Text else 0)))
+            modifier.child.layout(provider.child if new is not None and type(self.child) is type(new.child) else None)
+            if 0 in self.constraints and self.child is not None:
+                provider.size = Size(
+                    provider.child.size.width + provider.padding.left + provider.padding.right +
+                    provider.border_width * 2 + (provider.border_radius if provider.child is Text else 0),
+                    provider.child.size.height + provider.padding.top + provider.padding.bottom +
+                    provider.border_width * 2 + (provider.border_radius if provider.child is Text else 0))
+            provider.child_position = Position(
+                provider.padding.left + provider.border_width + (provider.border_radius if provider.child is Text else 0) // 2,
+                provider.padding.top + provider.border_width + (provider.border_radius if provider.child is Text else 0) // 2)
+        if 0 not in self.constraints:
             provider.size = Size(self.constraints[0], self.constraints[1])
-        provider.child_position = Position(provider.padding.left + provider.border_width + provider.border_radius // 2,
-                                           provider.padding.top + provider.border_width + provider.border_radius // 2)
 
     def register_events(self, absolute_position: Position, state: 'StatefulWidget', new: 'Container' = None):
-        self.child.register_events(Position(absolute_position.x + self.child_position.x,
-                                            absolute_position.y + self.child_position.y), state,
-                                   new.child if new is not None else None)
+        if self.child is not None:
+            self.child.register_events(Position(absolute_position.x + self.child_position.x,
+                                                absolute_position.y + self.child_position.y), state,
+                                       new.child if new is not None else None)
 
     def draw(self, new: 'Container' = None):
         if new is None:
             self._image = Image.new("RGBA", (self.size.width, self.size.height), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(self._image)
-            draw.rounded_rectangle((0, 0, self.size.width - 1, self.size.height - 1),
-                                   self.border_radius, fill=self.background_color.rgba, outline=self.border_color.rgba,
-                                   width=self.border_width)
+            if not (self.size.height == 0 or self.size.width == 0):
+                draw = ImageDraw.Draw(self._image)
+                draw.rounded_rectangle((0, 0, self.size.width - 1, self.size.height - 1),
+                                       self.border_radius, fill=self.background_color.rgba, outline=self.border_color.rgba,
+                                       width=self.border_width)
         elif self.as_changed(new):
             self._image = Image.new("RGBA", (new.size.width, new.size.height), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(self._image)
-            draw.rounded_rectangle((0, 0, new.size.width - 1, new.size.height - 1),
-                                   new.border_radius, fill=new.background_color.rgba, outline=new.border_color.rgba,
-                                   width=new.border_width)
-        self.child.draw(new.child if new is not None else None)
+            if not (self.size.height == 0 or self.size.width == 0):
+                draw = ImageDraw.Draw(self._image)
+                draw.rounded_rectangle((0, 0, new.size.width - 1, new.size.height - 1),
+                                       new.border_radius, fill=new.background_color.rgba, outline=new.border_color.rgba,
+                                       width=new.border_width)
+        if self.child is not None:
+            if new is not None and type(self.child) is not type(new.child):
+                new.child.draw()
+            else:
+                self.child.draw(new.child if new is not None else None)
 
     def composite(self, new: 'Container' = None):
-        result = False
-        if self.child.composite(new.child if new is not None else None) or new is None or self.as_changed(new):
-            if new is not None:
+        modifier = self
+        if new is not None:
+            if type(self.child) is not type(new.child):
+                modifier = new
+        if modifier.child is not None:
+            result = modifier.child.composite(new.child if new is not None and type(self.child) is type(new.child) else None)
+        else:
+            result = False
+        if new is None:
+            result = True
+        else:
+            if self.as_changed(new):
                 self.background_color = new.background_color
                 self.padding = new.padding
                 self.border_radius = new.border_radius
                 self.border_width = new.border_width
                 self.border_color = new.border_color
                 self.size = new.size
+                result = True
+            if type(self.child) is not type(new.child):
+                self.child = new.child
+                self.child_position = new.child_position
+                result = True
+        if result:
             self.image = self._image.copy()
-            self.image.alpha_composite(self.child.image, (self.child_position.x, self.child_position.y))
-            result = True
+            if modifier.child is not None:
+                self.image.alpha_composite(modifier.child.image, (modifier.child_position.x, modifier.child_position.y))
         return result
 
 
@@ -1029,6 +1095,8 @@ class InkWell(SingleChildWidget):
     def composite(self, new: 'InkWell' = None):
         if self.child.composite(new.child if new is not None else None) or new is None:
             self.image = self.child.image
+            if new is not None:
+                self.size = new.size
             return True
         return False
 
@@ -1080,9 +1148,10 @@ class IconButton(StatefulWidget):
     def build(self) -> Widget:
         return InkWell(
             child=Container(
-                child=self.icon,
                 background_color=self.background_color,
-                border_radius=20
+                border_radius=20,
+                padding=EdgeInsets.all(10),
+                child=self.icon
             ),
             on_hover=self._on_hover,
             on_click=self._on_click
